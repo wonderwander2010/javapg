@@ -91,21 +91,53 @@ public class App { // ★ アプリ本体です。
         } // ★ 接続とSQL文を閉じます。
     }
 
+    private static int deleteCompletedTodos() throws SQLException { // 完了済みのTodoをまとめて削除します。
+        String sql = "DELETE FROM todos WHERE done = 1"; // 完了済みの行だけを削除します。
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            return statement.executeUpdate(); // 削除できた件数を返します。
+        }
+    }
+
     private static String escapeHtml(String value) { // ★ HTMLで特別な意味を持つ文字を安全な表記にします。
         return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") // ★ 主要な記号を置き換えます。
                 .replace("\"", "&quot;").replace("'", "&#39;"); // ★ 引用符も置き換えます。
     }
 
-    private static String renderPage() throws SQLException { // ★ DBの一覧からHTMLページを作ります。
+    private static String renderPage(int deletedCount) throws SQLException { // ★ DBの一覧からHTMLページを作ります。
         List<Todo> todos = loadTodos(); // ★ SELECTで最新の一覧を読み込みます。
         StringBuilder html = new StringBuilder(); // ★ HTMLを組み立てます。
         html.append("<!doctype html><html lang='ja'><head><meta charset='UTF-8'>") // ★ HTMLの先頭です。
                 .append("<title>わたしのTodo</title>") // ★ ページタイトルです。
-                .append("<style>body{max-width:40rem;margin:2rem auto;padding:0 1rem;font-size:1rem;}h1{font-size:1.5rem;}input,button{font-size:1rem;}</style>") // ★
-                                                                                                                                                                  // 控えめな見た目の指定です。
+                .append("<style>body{max-width:40rem;margin:2rem auto;padding:0 1rem;font-size:1rem;}h1{font-size:1.5rem;}input,button{font-size:1rem;}#celebration{padding:.8rem 1rem;background:#fff5cc;border-radius:.5rem;animation:fadeout 5s 2s forwards;}#confetti{position:fixed;inset:0;pointer-events:none;overflow:hidden}@keyframes fall{to{transform:translateY(100vh) rotate(720deg);opacity:0}}@keyframes fadeout{to{opacity:0;visibility:hidden}}@media(prefers-reduced-motion:reduce){#celebration{animation:none}#confetti{display:none}}</style>") // ★
+                // 控えめな見た目の指定です。
                 .append("</head><body><h1>わたしのTodo</h1>") // ★ ページ見出しです。
                 .append("<form method='post' action='/add'><input name='todo'><button>追加</button></form>"); // ★
                                                                                                             // 追加フォームです。
+        if (deletedCount > 0) {
+            html.append("<p id='celebration' role='status'>完了済みのTodoを")
+                    .append(deletedCount).append("件片付けました！おつかれさま 🎉</p>")
+                    .append("<div id='confetti' aria-hidden='true'>");
+            String[] colors = { "#f94144", "#f9c74f", "#43aa8b", "#577590", "#f3722c" };
+            for (int i = 0; i < 36; i++) {
+                html.append("<i style='position:absolute;left:").append((i * 37) % 100)
+                        .append("%;top:-12px;width:7px;height:12px;background:")
+                        .append(colors[i % colors.length]).append(";animation:fall ")
+                        .append(2 + (i % 10) / 10.0).append("s ").append((i % 8) / 10.0)
+                        .append("s ease-in forwards'></i>");
+            }
+            html.append("</div>")
+                    .append("<script>(function(){try{var C=window.AudioContext||window.webkitAudioContext;if(!C)return;var c=new C();")
+                    .append("var t=c.currentTime;function note(f,start,dur,wave,vol){var o=c.createOscillator(),g=c.createGain();")
+                    .append("o.type=wave;o.frequency.value=f;g.gain.setValueAtTime(0.0001,t+start);g.gain.exponentialRampToValueAtTime(vol,t+start+0.015);")
+                    .append("g.gain.exponentialRampToValueAtTime(0.0001,t+start+dur);o.connect(g);g.connect(c.destination);o.start(t+start);o.stop(t+start+dur+0.02);}")
+                    .append("function drum(at,volume){var dur=.12,len=Math.floor(c.sampleRate*dur),buf=c.createBuffer(1,len,c.sampleRate),data=buf.getChannelData(0);")
+                    .append("for(var j=0;j<len;j++){var x=j/c.sampleRate,env=Math.exp(-x*30);data[j]=(Math.random()*2-1)*env;}")
+                    .append("var src=c.createBufferSource(),filter=c.createBiquadFilter(),gain=c.createGain();src.buffer=buf;filter.type='lowpass';filter.frequency.value=1800;")
+                    .append("gain.gain.setValueAtTime(volume,t+at);gain.gain.exponentialRampToValueAtTime(.001,t+at+dur);src.connect(filter);filter.connect(gain);gain.connect(c.destination);src.start(t+at);}")
+                    .append("var roll=0;for(var k=0;k<28;k++){drum(roll,.12+Math.min(k/28,.7)*.12);roll+=.19-k*.0045;}")
+                    .append("[[523.25,roll,.22],[659.25,roll+.14,.22],[783.99,roll+.28,.22],[1046.5,roll+.42,.72],[1318.51,roll+.45,.62],[1567.98,roll+.48,.55],[2093,roll+.52,.42],[1046.5,roll+.78,.5],[1318.51,roll+.8,.48],[1567.98,roll+.82,.46]].forEach(function(n,i){note(n[0],n[1],n[2],i<6?'triangle':'sine',i<6?.2:.12);});")
+                    .append("setTimeout(function(){c.close();},5500);}catch(e){}})();</script>");
+        }
         int completedCount = 0; // 完了済みのTodo数を数えます。
         for (Todo todo : todos) { // Todoを順番に確認します。
             if (todo.isDone()) { // 完了済みか調べます。
@@ -113,6 +145,10 @@ public class App { // ★ アプリ本体です。
             } // 完了状態の確認を終えます。
         } // 完了数の集計を終えます。
         html.append("<p>").append(todos.size()).append("件中").append(completedCount).append("件 完了</p>"); // 全件数と完了数を表示します。
+        if (completedCount > 0) {
+            html.append(
+                    "<form method='post' action='/delete-completed' onsubmit=\"return confirm('完了済みのTodoをすべて削除します。よろしいですか？');\"><button type='submit'>完了済みを一括削除</button></form>");
+        }
         if (todos.isEmpty()) { // ★ Todoが0件か確認します。
             html.append("<p>やることは、いまゼロです</p>"); // ★ 0件の案内を表示します。
         } else { // ★ Todoがある場合です。
@@ -240,10 +276,18 @@ public class App { // ★ アプリ本体です。
                     exchange.sendResponseHeaders(303, -1); // ★ ページ移動を指示します。
                     exchange.close(); // ★ 通信を閉じます。
                     return; // ★ 削除要求を終えます。
+                } else if (path.equals("/delete-completed") && method.equals("POST")) {
+                    int deletedCount = deleteCompletedTodos();
+                    byte[] response = renderPage(deletedCount).getBytes(StandardCharsets.UTF_8);
+                    exchange.getResponseHeaders().set("Content-Type", "text/html; charset=UTF-8");
+                    exchange.sendResponseHeaders(200, response.length);
+                    exchange.getResponseBody().write(response);
+                    exchange.getResponseBody().close();
+                    return;
                 } else if (path.equals("/")) { // ★ 一覧ページの要求です。
                     exchange.getResponseHeaders().set("Content-Type", "text/html; charset=UTF-8"); // ★
                                                                                                    // HTMLとUTF-8を指定します。
-                    byte[] response = renderPage().getBytes(StandardCharsets.UTF_8); // ★ SELECT結果から画面を作ります。
+                    byte[] response = renderPage(0).getBytes(StandardCharsets.UTF_8); // ★ SELECT結果から画面を作ります。
                     exchange.sendResponseHeaders(200, response.length); // ★ 成功応答を始めます。
                     exchange.getResponseBody().write(response); // ★ HTMLを送ります。
                     exchange.getResponseBody().close(); // ★ 応答を閉じます。
